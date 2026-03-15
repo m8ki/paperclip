@@ -556,8 +556,14 @@ export function issueRoutes(db: Db, storage: StorageService) {
       !!existing.createdByUserId &&
       req.body.assigneeUserId === existing.createdByUserId;
 
+    const isAgentReassigningToOtherAgent =
+      req.actor.type === "agent" &&
+      !!req.actor.agentId &&
+      typeof req.body.assigneeAgentId === "string" &&
+      req.body.assigneeAgentId.length > 0;
+
     if (assigneeWillChange) {
-      if (!isAgentReturningIssueToCreator) {
+      if (!isAgentReturningIssueToCreator && !isAgentReassigningToOtherAgent) {
         await assertCanAssignTasks(req, existing.companyId);
       }
     }
