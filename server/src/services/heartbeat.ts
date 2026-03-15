@@ -115,7 +115,7 @@ async function withAgentStartLock<T>(agentId: string, fn: () => Promise<T>) {
 
 interface WakeupOptions {
   source?: "timer" | "assignment" | "on_demand" | "automation";
-  triggerDetail?: "manual" | "ping" | "callback" | "system";
+  triggerDetail?: "manual" | "ping" | "callback" | "system" | "auto_retry_after_failure";
   reason?: string | null;
   payload?: Record<string, unknown> | null;
   idempotencyKey?: string | null;
@@ -420,6 +420,12 @@ function enrichWakeContextSnapshot(input: {
   }
   if (!readNonEmptyString(contextSnapshot["wakeTriggerDetail"]) && triggerDetail) {
     contextSnapshot.wakeTriggerDetail = triggerDetail;
+  }
+  if (payload?.retryHandoff != null && typeof payload.retryHandoff === "string") {
+    contextSnapshot.paperclipRetryHandoff = payload.retryHandoff;
+  }
+  if (payload?.retryAfterFailedRunId != null && typeof payload.retryAfterFailedRunId === "string") {
+    contextSnapshot.retryAfterFailedRunId = payload.retryAfterFailedRunId;
   }
 
   return {
@@ -1574,6 +1580,19 @@ export function heartbeatService(db: Db) {
       delete context.paperclipPreviousSessionId;
     }
 
+    const retryHandoff = readNonEmptyString(context.paperclipRetryHandoff);
+    if (retryHandoff) {
+      context.paperclipSessionHandoffMarkdown = retryHandoff;
+      context.paperclipSessionRotationReason = "Auto-retry after failure with compact context";
+      context.paperclipPreviousSessionId = previousSessionDisplayId ?? runtimeSessionIdForAdapter;
+      runtimeSessionIdForAdapter = null;
+      runtimeSessionParamsForAdapter = null;
+      previousSessionDisplayId = null;
+      runtimeWorkspaceWarnings.push(
+        "Starting a fresh session for automatic retry after failure (compact context).",
+      );
+    }
+
     const runtimeForAdapter = {
       sessionId: runtimeSessionIdForAdapter,
       sessionParams: runtimeSessionParamsForAdapter,
@@ -2006,6 +2025,54 @@ export function heartbeatService(db: Db) {
             lastRunId: failedRun.id,
             lastError: message,
           });
+        }
+
+        const isAutoRetryRun = run.triggerDetail === "auto_retry_after_failure";
+        const shouldEnqueueAutoRetry =
+          !isAutoRetryRun &&
+          Boolean(issueId) &&
+          failedRun.errorCode === "adapter_failed";
+        if (shouldEnqueueAutoRetry) {
+          const failedSummary = summarizeHeartbeatRunResultJson(failedRun.resultJson);
+          const failedTextSummary =
+            readNonEmptyString(failedSummary?.summary) ??
+            readNonEmptyString(failedSummary?.result) ??
+            readNonEmptyString(failedSummary?.message) ??
+            null;
+          const retryHandoffMarkdown = [
+            "Paperclip auto-retry handoff:",
+            `- Previous run failed: ${message}`,
+            failedTextSummary ? `- Last run summary: ${failedTextSummary}` : "",
+            "Continue from the current task state. Rebuild only the minimum context you need.",
+          ]
+            .filter(Boolean)
+            .join("\n");
+          const taskIdForPayload = readNonEmptyString(context.taskId) ?? issueId ?? null;
+          try {
+            await enqueueWakeup(agent.id, {
+              source: "automation",
+              triggerDetail: "auto_retry_after_failure",
+              reason: "auto_retry_after_failure",
+              payload: {
+                issueId,
+                ...(taskIdForPayload ? { taskId: taskIdForPayload } : {}),
+                ...(taskKey ? { taskKey } : {}),
+                retryHandoff: retryHandoffMarkdown,
+                retryAfterFailedRunId: failedRun.id,
+              },
+              contextSnapshot: {
+                issueId,
+                ...(taskIdForPayload ? { taskId: taskIdForPayload } : {}),
+                ...(taskKey ? { taskKey } : {}),
+                forceFreshSession: true,
+              },
+            });
+          } catch (enqueueErr) {
+            logger.warn(
+              { err: enqueueErr, runId: failedRun.id, agentId: agent.id },
+              "auto-retry wakeup enqueue failed",
+            );
+          }
         }
       }
 

@@ -181,7 +181,7 @@ export const HEARTBEAT_INVOCATION_SOURCES = [
 ] as const;
 export type HeartbeatInvocationSource = (typeof HEARTBEAT_INVOCATION_SOURCES)[number];
 
-export const WAKEUP_TRIGGER_DETAILS = ["manual", "ping", "callback", "system"] as const;
+export const WAKEUP_TRIGGER_DETAILS = ["manual", "ping", "callback", "system", "auto_retry_after_failure"] as const;
 export type WakeupTriggerDetail = (typeof WAKEUP_TRIGGER_DETAILS)[number];
 
 export const WAKEUP_REQUEST_STATUSES = [

@@ -747,6 +747,11 @@ function LatestRunCard({ runs, agentId }: { runs: HeartbeatRun[]; agentId: strin
           )}>
             {sourceLabels[run.invocationSource] ?? run.invocationSource}
           </span>
+          {String(run.triggerDetail) === "auto_retry_after_failure" && (
+            <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+              Auto-retry
+            </span>
+          )}
           <span className="ml-auto text-xs text-muted-foreground">{relativeTime(run.createdAt)}</span>
         </div>
 
@@ -1153,6 +1158,11 @@ function RunListItem({ run, isSelected, agentId }: { run: HeartbeatRun; isSelect
         )}>
           {sourceLabels[run.invocationSource] ?? run.invocationSource}
         </span>
+        {String(run.triggerDetail) === "auto_retry_after_failure" && (
+          <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+            Auto-retry
+          </span>
+        )}
         <span className="ml-auto text-[11px] text-muted-foreground shrink-0">
           {relativeTime(run.createdAt)}
         </span>
@@ -1476,6 +1486,22 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType }: { run: Heartb
                 )}
               </div>
             )}
+            {(() => {
+              const ctx = asRecord(run.contextSnapshot);
+              const retryAfterRunId = typeof ctx?.retryAfterFailedRunId === "string" ? ctx.retryAfterFailedRunId : null;
+              return retryAfterRunId ? (
+                <div className="text-xs text-muted-foreground">
+                  This run was an automatic retry after{" "}
+                  <Link
+                    to={`/agents/${agentRouteId}/runs/${retryAfterRunId}`}
+                    className="text-primary underline underline-offset-2 hover:no-underline"
+                  >
+                    run {retryAfterRunId.slice(0, 8)}
+                  </Link>
+                  .
+                </div>
+              ) : null;
+            })()}
             {run.error && (
               <div className="text-xs">
                 <span className="text-red-600 dark:text-red-400">{run.error}</span>
